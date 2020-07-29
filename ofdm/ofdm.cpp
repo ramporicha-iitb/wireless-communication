@@ -13,16 +13,18 @@ using namespace itpp;
 #define DEBUG_SYM_COUNT     4
 
 #define CP_LEN              16
-#define FFT_SIZE            128
-#define NUM_OF_SYMBOLS      1e5
+#define NUM_SUBCARRIER      128
+#define NUM_OFDM_FRAMES     1e5
 #define OUTPUT_FILENAME     "ofdm.it"
 
 int main()
 {
+    RNG_randomize();
+    
     // Modulators
     BPSK_c modulator;
     OFDM ofdm;
-    ofdm.set_parameters(FFT_SIZE, CP_LEN);
+    ofdm.set_parameters(NUM_SUBCARRIER, CP_LEN);
     DEBUG_MSG ("Symbols: " << modulator.get_symbols());
     
     // Channels
@@ -38,7 +40,7 @@ int main()
     
     // Number of bits transmitted for each Eb/N0 valaue
     int num_tx_bits;
-    num_tx_bits = NUM_OF_SYMBOLS * FFT_SIZE * modulator.bits_per_symbol();
+    num_tx_bits = NUM_OFDM_FRAMES * NUM_SUBCARRIER * modulator.bits_per_symbol();
    
     // Transmitted bits / symbols
     bvec tx_bits, rx_bits;
@@ -51,8 +53,6 @@ int main()
     vec ber;
     BERC berc;
     ber.set_size(EbN0dB.length());
-
-    RNG_randomize();
     
     Real_Timer timer;
     timer.tic();
