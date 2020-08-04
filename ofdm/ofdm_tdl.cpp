@@ -56,7 +56,7 @@ int main()
     cvec rx_symbols;
     cvec tx_ofdm_symbols;
     cvec rx_ofdm_symbols;
-    cvec rx_symbols_qualized;
+    cvec rx_symbols_equalized;
 
     // Bit error rates 
     vec ber;
@@ -133,10 +133,10 @@ int main()
                 // FFT of channel coefficient matrix
                 hfft = concat(hfft, fft(relevant_channel_coeff.get_row(i), Nsub));
             }
-            rx_symbols_qualized = elem_div(rx_symbols, hfft);
+            rx_symbols_equalized = elem_div(rx_symbols, hfft);
             
             // Demodulate the received symbols into bits
-            rx_bits = modulator.demodulate_bits(rx_symbols_qualized);
+            rx_bits = modulator.demodulate_bits(rx_symbols_equalized);
             DEBUG_MSG("Number of Rx bits: " << rx_bits.length());
             DEBUG_MSG("Sample Rx bits: " << rx_bits.left(DEBUG_SYM_COUNT));
         
