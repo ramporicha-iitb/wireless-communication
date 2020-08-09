@@ -5,6 +5,9 @@
 using namespace std;
 using namespace itpp;
 
+using namespace std;
+using namespace itpp;
+
 #define DEBUG 0
 
 #if DEBUG
@@ -15,7 +18,7 @@ using namespace itpp;
 
 #define CYCLIC_PREFIX_LEN   16
 #define NUM_SUBCARRIER      128
-#define NUM_OFDM_FRAMES     (5 * 1e5)
+#define NUM_OFDM_FRAMES     1e4
 
 #define FRAME_FB_INTV       8
 #define SUBCARRIER_FB_INTV  8
@@ -24,9 +27,53 @@ using namespace itpp;
 #define NUM_TX_ANTENNA      2
 #define NUM_RX_ANTENNA      2
 
-#define OUTPUT_FILENAME     "vector_quantization.it"
+#define OUTPUT_FILENAME     "scalar_parameter_quantization.it"
 
-void generate_vector_codebook(int Nr, int Nt, int cb_size, Array<mat>& codebook);
+void get_scalar_parameters(cmat V, Array<vec>& phases, Array<vec>& rotation_angles);
+void generate_scalar_parameter_codebook(int t, int n, int cb_size,
+        vec& phase_cb, Array<vec>& rotation_angle_cb);
+
+// Reconstruction of precoding matrix (V) from phase-angle and rotation-angle parametes 
+void construct_precoding_matrix(int t, int n,
+        const Array<vec>& phases, const Array<vec>& rotation_angles,
+        cmat& VQmat)
+{
+    double theta;
+    int phase_index = 0;
+    int angle_index = 0;
+
+    cvec D(t);  // vector of size t
+    cmat G;     // Givens matrix of size t x t
+
+    VQmat = eye_c(t);
+
+    for (int k = 0; k < n; ++k)
+    {
+        D.ones();
+        D.set_subvector(k, exp(1j * phases(k)));
+
+        phase_index += (t-k);
+
+        VQmat *= diag(D);
+
+        for (int l = 0; l < t-k-1; ++l)
+        {
+            theta = rotation_angles(k)(l);
+            G = itpp::eye_c(t);
+
+            G(t-l-1,t-l-1) = cos(theta);
+            G(t-l-2,t-l-1) = -sin(theta);
+            G(t-l-1,t-l-2) = sin(theta);
+            G(t-l-2,t-l-2) = cos(theta);
+
+            VQmat *= G;
+        }
+    }
+
+    cmat eye_tilde = zeros_c(t,n);
+    eye_tilde.set_submatrix(0,0,eye_c(n));
+    VQmat *= eye_tilde;
+}
 
 int main(int argc, char *argv[])
 {
@@ -72,20 +119,25 @@ int main(int argc, char *argv[])
     // SVD matrices
     size_t fb_count = Nsub / SUBCARRIER_FB_INTV;
     vec S[fb_count];
-    cmat U[fb_count], V[fb_count], Uh[fb_count], VQ[fb_count];
+    cmat U[fb_count], V[fb_count], Uh[fb_count], VQ[fb_count];;
 
     // Codebook
-    Array<mat> codebook(Nt);
-    generate_vector_codebook(Nr, Nt, CODEBOOK_SIZE, codebook);
-    DEBUG_MSG("Codebook: \n" << codebook);
+    vec phase_codebook;                     
+    Array<vec> rot_angle_codebook(Nt);
+    generate_scalar_parameter_codebook(Nr, Nt, CODEBOOK_SIZE, 
+            phase_codebook, rot_angle_codebook);
 
     // Quantizer
-    Array<Vector_Quantizer> quantizer(Nt);
-    for (int i = 0; i < Nt; ++i)
+    Scalar_Quantizer phase_quantizer;
+    Array<Scalar_Quantizer> rot_angle_quantizer(Nt);
+
+    phase_quantizer.set_levels(phase_codebook);
+    for (int l = 0; l < Nt; ++l)
     {
-        // quantizer(i): quantizer for i-th column of precoding matrix
-        quantizer(i).set_codebook(codebook(i));
+        rot_angle_quantizer(l).set_levels(rot_angle_codebook(l));
     }
+    DEBUG_MSG("Phase-angle codebook: \n" << phase_codebook);
+    DEBUG_MSG("Rotation-angle codebooks: \n" << rot_angle_codebook);
 
     Real_Timer timer;
     timer.tic();
@@ -133,46 +185,61 @@ int main(int argc, char *argv[])
                         hfft[i][j] = fft(relevant_channel_coeff[i][j], Nsub);
                     }
                 }
-
+          
                 cmat h_mat(Nr,Nt);      //Channel matrix at each time index
                 size_t fb_mat_count = 0;
-                for (int k = 0; k < Nsub; ++k)
+                for (int sc = 0; sc < Nsub; ++sc)
                 {
-                    if (k % SUBCARRIER_FB_INTV == 0)
+                    if (sc % SUBCARRIER_FB_INTV == 0)
                     {
                         for (int i = 0; i < Nr; ++i)
                         {
                             for (int j = 0; j < Nt; ++j)
                             {
-                                h_mat(i,j) = hfft[i][j](k);
+                                h_mat(i,j) = hfft[i][j](sc);
                             }
                         }
 
                         // Channel matrix -> SVD -> Precoding matrix
                         svd(h_mat, U[fb_mat_count], S[fb_mat_count], V[fb_mat_count]);
-                        
-                        // Precoding matrix quantization
-                        vec quantized_vec;
+
+                        // Paramterization: Get scalar parameters for given precoding matrix using Givens rotation
                         cmat& VQref = VQ[fb_mat_count];
                         const cmat& Vref = V[fb_mat_count];
-                        VQref.set_size(Vref.rows(), Vref.cols());
-                        for (int q = 0; q < Vref.cols(); ++q)
+                        Array<vec> phases(Vref.cols()), rot_angles(Vref.cols()-1);
+                        get_scalar_parameters(Vref, phases, rot_angles);
+                       
+                        // Precoding matrix quantization (Receiver)
+                        Array<vec> quantized_phases(Vref.cols()), quantized_rot_angles(Vref.cols()-1);
+                        for (int k = 0; k < Vref.cols(); ++k)
                         {
                             // In practise we would use encode/decode function
-                            quantized_vec = quantizer(q).Q(concat(real(Vref.get_col(q)), imag(Vref.get_col(q))));
-                            VQref.set_col(q, to_cvec(quantized_vec.left(Nt), quantized_vec.right(Nt)));
+                            quantized_phases(k) = phase_quantizer.Q(phases(k));
+
+                            for (int l = 0; l < Nt-k-1; ++l)
+                            {
+                                quantized_rot_angles(k) = concat(quantized_rot_angles(k), rot_angle_quantizer(l).Q(rot_angles(k)(l)));
+                            }
                         }
                         hermitian_transpose(U[fb_mat_count], Uh[fb_mat_count]);
 
-                        DEBUG_MSG("Quantized precoding matrix(VQ) size: "
-                                << VQ[fb_mat_count].rows() << "x" << VQ[fb_mat_count].cols());
+                        DEBUG_MSG("Phases: \n" << phases);
+                        DEBUG_MSG("Quantized phases: \n" << quantized_phases);
+                        DEBUG_MSG("Rotation angles: \n" << rot_angles);
+                        DEBUG_MSG("Quantized rotation angles: \n" << quantized_rot_angles);
                         
                         ++fb_mat_count;
+                        
+                        // Reconstruct precoding matrix from quantized scalar parameter feedback (Transmitter)
+                        construct_precoding_matrix(Vref.rows(), Vref.cols(), 
+                                quantized_phases, quantized_rot_angles, VQref);
+                        DEBUG_MSG("Precoding matrix (V): \n" << Vref);
+                        DEBUG_MSG("Quantized precoding matrix (VQ): \n" << VQref);
                     }
                 }
                 continue;
             }
-
+ 
             /*-------------------------- TRANSMITTER -----------------------------*/
             // Generate a vector of random bits to transmit
 
@@ -291,7 +358,7 @@ int main(int argc, char *argv[])
             total_bit_count += berc.get_total_bits();
             DEBUG_MSG("Error count: " << err_count << "\t\t" << "Total count: " << total_bit_count);
         }
-
+        
         ber(snr_loop) = (double)err_count / total_bit_count;
         cout << "Eb/N0 (dB): " << EbN0dB[snr_loop] << "\t\t" << "BER: " << ber(snr_loop) << endl;
         DEBUG_MSG("------------------------------------------------------------------------------");

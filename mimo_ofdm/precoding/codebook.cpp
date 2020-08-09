@@ -54,3 +54,37 @@ void generate_vector_codebook(
         codebook(i) = lbg(training_data(i), cb_size, 9999, false);
     }
 }
+
+void generate_scalar_parameter_codebook (
+        int t, int n, int cb_size,
+        vec& phase_cb, Array<vec>& rotation_angle_cb)
+{
+    assert(rotation_angle_cb.size() == t);
+
+    /* Precoding matrix V is of size t x n, t >= n
+     *
+     * Phases Phi(k,j) is uniformly disributed over (-pi, pi] for all k and j
+     *
+     * PDF of rotation angle theta(k,l) - 2l * sin(theta(k,l)) ^ (2l-1) * cos(theta(k,l)),
+     * 0 <= theta(k,l) < pi/2, for 1 <= k <= n, 1 <= l <= t-k
+     */
+
+    // Train - Phase angle
+    // Uniform random numbers between -pi and pi
+    vec rand_phases = 2*pi*randu(NUM_TRAIN_SAMPLES) - pi;
+    phase_cb = sqtrain(rand_phases, cb_size);
+
+    // Train - Rotation angles
+    vec rand_theta, rand_rotation_angles;
+
+    for (int l=1; l <= t; ++l)
+    {
+        rand_theta = pi/2*randu(NUM_TRAIN_SAMPLES);
+
+        // random numbers for rotation angles
+        rand_rotation_angles = 2*l*elem_mult(pow(sin(rand_theta), 2*l - 1), cos(rand_theta));
+
+        // rotation_angle_cb(l): codebook for theta(k,l)
+        rotation_angle_cb(l-1) = sqtrain(rand_rotation_angles, cb_size);
+    }
+}
