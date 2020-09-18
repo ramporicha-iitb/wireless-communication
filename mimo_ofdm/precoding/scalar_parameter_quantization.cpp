@@ -29,51 +29,20 @@ using namespace itpp;
 
 #define OUTPUT_FILENAME     "scalar_parameter_quantization.it"
 
-void get_scalar_parameters(cmat V, Array<vec>& phases, Array<vec>& rotation_angles);
-void generate_scalar_parameter_codebook(int t, int n, int cb_size,
-        vec& phase_cb, Array<vec>& rotation_angle_cb);
+void get_scalar_parameters(cmat V, 
+        Array<vec>& phases, 
+        Array<vec>& rotation_angles);
 
-// Reconstruction of precoding matrix (V) from phase-angle and rotation-angle parametes 
-void construct_precoding_matrix(int t, int n,
-        const Array<vec>& phases, const Array<vec>& rotation_angles,
-        cmat& VQmat)
-{
-    double theta;
-    int phase_index = 0;
-    int angle_index = 0;
+void generate_scalar_parameter_codebook(
+        int t, int n, int cb_size,
+        vec& phase_cb, 
+        Array<vec>& rotation_angle_cb);
 
-    cvec D(t);  // vector of size t
-    cmat G;     // Givens matrix of size t x t
-
-    VQmat = eye_c(t);
-
-    for (int k = 0; k < n; ++k)
-    {
-        D.ones();
-        D.set_subvector(k, exp(1j * phases(k)));
-
-        phase_index += (t-k);
-
-        VQmat *= diag(D);
-
-        for (int l = 0; l < t-k-1; ++l)
-        {
-            theta = rotation_angles(k)(l);
-            G = itpp::eye_c(t);
-
-            G(t-l-1,t-l-1) = cos(theta);
-            G(t-l-2,t-l-1) = -sin(theta);
-            G(t-l-1,t-l-2) = sin(theta);
-            G(t-l-2,t-l-2) = cos(theta);
-
-            VQmat *= G;
-        }
-    }
-
-    cmat eye_tilde = zeros_c(t,n);
-    eye_tilde.set_submatrix(0,0,eye_c(n));
-    VQmat *= eye_tilde;
-}
+void construct_precoding_matrix(
+        int t, int n,
+        const Array<vec>& phases, 
+        const Array<vec>& rotation_angles,
+        cmat& VQmat);
 
 int main(int argc, char *argv[])
 {
